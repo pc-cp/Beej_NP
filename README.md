@@ -1,4 +1,5 @@
 # Beej_NP
+[Beej's Guide to Network Programming Using Internet Sockets](https://beej.us/guide/bgnet/)
 
 QA
 
@@ -59,5 +60,49 @@ QA
         client: received 'Hello, World!'
         ```
     3. 适用场景：非阻塞模式适用于需要实时响应的情况，例如实施数据采集或多客户端的服务器。在这种情况下，结合select或poll等多路复用机制，服务器可以高效地管理多个客户端的连接。
+## chap7-3
+1. select的BUGS(`man select`)
+    >Under Linux, select() may **report a socket file descriptor as "ready for reading", while  nevertheless  a subsequent  read  blocks**. This could for example happen when data has arrived but upon examination has wrong checksum and is discarded. There may be other circumstances in which a file descriptor is  **spuriously reported as ready**. Thus it may be safer to use **O_NONBLOCK** on sockets that should not block.
+2. 尽管select和poll API强调可同时监听多种类型的事件，但是往往在使用时只设置"ready for reading"事件，这是为什么？
+    1. 常见场景主要是等待客户端的请求
+        许多网络程序（Webserver）最常见的任务是等待客户端的请求或数据（可读事件）。服务端往往先等待客户端发送的数据，接收后再决定如何处理并响应。可读事件常常是触发业务逻辑的关键。
+    2. 可写事件的触发频率较高
+        在默认情况下，一个socket在没有阻塞的情况下，通常会一直处于可写状态。这意味着，如果我们监听可写事件，则poll或select可能会频繁地返回该事件，即使没有需要写入的数据。这种频繁的返回会浪费资源，增加不必要的CPU占用。
+    3. 写操作通常在需要时直接进行
+        由上述可知，大多数应用在有数据需要写入时会/可以直接执行写操作。
+3. 返回值rv和errno的关系
+    1. 大多数系统调用在失败时会返回-1或NULL，并设置errno
+    2. errno提供了具体的错误原因，但在每次成功的函数调用后不会自动清零（手动设0以便于检测新的错误）。
+    3. errno的错误信息可以通过perror或strerror(errno)来获取用户友好的描述。
+4. send函数在阻塞socket下会保证发送完全部数据后返回，而在非阻塞socket下需要手动保证：
+    > **[阻塞 socket 是否能确保所有数据都发送完？]**
+    ```cpp
+    int sendall(int s, char *buf, int *len) {
+        int flags;
+        if((flags = fcntl(newfd, F_SETFL, 0)) < 0) { // 获取当前flags
+            perror("fcntl");
+            return 2;
+        }
+        flags |= O_NONBLOCK;    // 在原flags上添加非阻塞标志
+        if((rv = fcntl(newfd, F_SETFL, flags)) < 0) { // 设置新的flags
+            perror("fcntl");
+            return 2;
+        }
 
-4. 
+        int total = 0;              // how many bytes we've sent 
+        int bytesleft = *len;       // how many we have left to send 
+        int n;
+
+        while(total < *len) {
+            n = send(s, buf+total, bytesleft, 0);
+            if(n == -1) {break;}
+
+            total += n;
+            bytesleft -= n;
+        }
+        *len = total;               // return number actually sent here 
+        return n == -1 ? -1 : 0;    // return -1 on failure, 0 on success
+    }
+    ```
+
+
