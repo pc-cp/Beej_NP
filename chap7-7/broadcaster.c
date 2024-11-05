@@ -1,8 +1,26 @@
 /*
     broadcaster.c -- a datagram "client" like talker.c,
                      this one can broadcast
+    在本地同时运行listener.c,
+    需要加
+    “
+        int opt = 1;
 
-                     这个代码似乎不成功
+        // 允许地址复用
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+            perror("setsockopt(SO_REUSEADDR) failed");
+            exit(1);
+        }
+
+        // 允许端口复用（如果系统支持 SO_REUSEPORT）
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
+            perror("setsockopt(SO_REUSEPORT) failed");
+            exit(1);
+        }
+    ”
+
+    然后本地运行命令./broadcaster 255.255.255.255 "Your message here"
+    两个listener.c接收到
 */
 
 #include <stdio.h>

@@ -1,5 +1,5 @@
 /*
- server.c -- a stream socket server demo 
+ server_thread.cc -- a stream socket server demo 
 */
 
 #include <stdio.h>
@@ -14,6 +14,9 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <boost/function.hpp>
+#include <boost/bind.hpp>
+#include "/home/pengchen/workplace/recipes/thread/ThreadPool.h"
 
 #define PORT "8080"     // the port users will be connecting to
 #define BACKLOG 10      // how many pending connecting queue will hold
@@ -48,6 +51,22 @@ unsigned int get_in_port(struct sockaddr* sa) {
     else {
         return (((struct sockaddr_in6*)sa)->sin6_port);
     }
+}
+
+void child(int sockfd) {
+    while(1) {
+        /*
+            捕获 SIGPIPE 信号：当客户端断开连接后，服务器对该套接字继续调用 send 可能会触发 SIGPIPE 信号，
+            从而导致服务器进程终止。为了避免这个问题，可以忽略 SIGPIPE，或在调用 send 时加入 MSG_NOSIGNAL 标志。
+        */
+
+        if(send(sockfd, "Hello, World!", 13, MSG_NOSIGNAL) == -1) {
+            perror("send");
+            break;
+        }
+        sleep(3);
+    }
+    close(sockfd);
 }
 
 int main(void) {
@@ -102,15 +121,18 @@ int main(void) {
         exit(1);
     }
 
-    sa.sa_handler = sigchld_handler;        // reap all dead processes
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
-    if(sigaction(SIGCHLD, &sa, NULL) == -1) {
-        perror("sigaction");
-        exit(1);
-    }
+    // sa.sa_handler = sigchld_handler;        // reap all dead processes
+    // sigemptyset(&sa.sa_mask);
+    // sa.sa_flags = SA_RESTART;
+    // if(sigaction(SIGCHLD, &sa, NULL) == -1) {
+    //     perror("sigaction");
+    //     exit(1);
+    // }
 
     printf("server: waiting for connections...\n");
+
+    muduo::ThreadPool pool("MainThreadPool");
+    pool.start(5);
 
     while(1) {  // main accept() loop
         sin_size = sizeof their_addr;
@@ -124,19 +146,9 @@ int main(void) {
                  get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
         printf("server: got connection from %s(%d)\n", s, get_in_port((struct sockaddr *)&their_addr));
 
-        if(!fork()) {   // this is the child process 
-            close(sockfd);      // child doesn't need the listener 
-            // while(1) {
-                if(send(new_fd, "Hello, World!", 13, 0) == -1) {
-                    perror("send");
-                    // break;
-                }
-                // sleep(3);
-            // }
-            close(new_fd);
-            exit(0);
-        }
-        close(new_fd); // parent dosen't need this
+        pool.run(boost::bind(child, new_fd));
     }
+    printf(".....\n");
+    pool.stop();
     return 0;
 }

@@ -1,8 +1,6 @@
 # Beej_NP
 [Beej's Guide to Network Programming Using Internet Sockets](https://beej.us/guide/bgnet/)
 
-QA
-
 ## chap7-1
 1. 有人说recv只是与socket的接收缓冲区打交道，而不是recv本身从对方接收数据。同时send只是与发送缓冲区打交道，而不是send本身将数据发给对方。如何理解？
 
@@ -105,4 +103,18 @@ QA
     }
     ```
 
+## chap7-5
+1. 浮点数的二进制表示: [IEEE754](https://en.wikipedia.org/wiki/Single-precision_floating-point_format)
+    > **[ieee754.c程序是如何实现的呢？]**
+    ![ieee754](./images/ieee754.png)
+
+
+## 个人笔记
+1. server端的监听socket为什么需要bind()? 为什么accept返回的通信socket不需要？主机有多个IP出于什么考虑？
+    1. 服务器端需要bind(): bind()的作用是将一个特定的IP地址和端口号与server端的套接字关联起来，以便监听并接受来自客户端的连接请求。
+    2. 支持多网卡或多个IP地址的情况: bind()允许服务器绑定到特定的IP地址，或者使用INADDR_ANY(0.0.0.0)来绑定所有可用的网络接口。
+    3. accept()返回的通信套接字不需要bind是因为它继承了监听套接字的绑定信息，并且accept的本质是从已有连接中提取一个用于通信的套接字。
+2. 主机有多个IP出于什么考虑？
+    1. 多网卡配置: 一台主机安装了多个网络接口卡(NIC)，每个网络接口可以绑定不同的IP地址。例如一个网卡绑定到内网，一个网卡绑定到外网，分别绑定内网和公网IP。
+    2. 支持不同的网络协议: 同时支持IPv4和IPv6。
 
