@@ -35,11 +35,21 @@
         
     影响的是服务器端的recv和send操作，而不是客户端的recv和send操作
     1. 服务器端的recv：当服务器调用recv去接收数据时，如果没有数据可用，**recv会立即返回-1**，并将errno设置为EAGAIN或EWOULDBLOCK，表示当前没有数据可读取。服务器可以继续执行其他操作而无需等待数据到达
-
     2. 服务器端的send：当服务器调用send发送数据时，如果发送缓冲区已满，send会立即返回-1，并将errno设置为EAGAIN或EWOULDBLOCK，表示无法立即发送。服务器可以选择稍后重试发送数据。
+    3. 补充：服务器端的accept：当服务器调用accept等待新用户连接时，如果当前accept设置为阻塞(默认)，那么会阻塞直到新用户连接才返回。如果设置为非阻塞，那么accept会立即返回-1，并将errno设置为EAGAIN或EWOULDBLOCK，表示当前无新用户连接。
+    4. RETURN VALUE
+        1. `ssize_t recv(int sockfd, void *buf, size_t len, int flags);`:   
+        These calls return the number of bytes received, or -1 if an error occurred.  In the event of an error, errno is set to indicate the error. **When a stream socket peer has performed an orderly shutdown, the return value will be 0 (the traditional "end-of-file" return).**
+        2. `int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);`:   
+        On success, these system calls return a nonnegative integer that is a file descriptor for the  accepted  socket. On error, -1 is returned, errno is set appropriately, and addrlen is left unchanged.
+        3. `ssize_t send(int sockfd, const void *buf, size_t len, int flags);`:   
+        On success, these calls return the number of bytes sent.  On error, -1 is returned, and errno is set appropriately.
+    5. ERRORS(部分截取)
+        > EAGAIN or EWOULDBLOCK  
+        > The socket is marked nonblocking and **the receive operation would block, or a receive timeout had been set and the timeout expired before data was received.**/(**the requested operation would block.**)/(**no connections are present to be accepted**) POSIX.1 allows either error to be returned for this case, and does not require these constants to have the same value, so a portable application should check for both possibilities.
 
 3. 理解阻塞和非阻塞模式对recv的影响（send同理）：
-    1. 非阻塞模式的行为：当recv调用的接收缓冲区为空时，recv立即返回-1，并将errno设置为EAGAIN或EWOULDBLOCK，表示没有数据可供读取。其避免了进程被挂起，但会导致程序不断尝试recv，即所谓的“忙等待”现象，这会耗费CPU资源。因此，在实际使用中，非阻塞模式通常结合select或poll等系统调用，以高效地等待数据而避免忙等待。
+    1. 非阻塞模式的行为：当recv调用的接收缓冲区为空时，recv立即返回-1，并将errno设置为EAGAIN或EWOULDBLOCK，表示没有数据可供读取。**其避免了进程被挂起，但会导致程序不断尝试recv，即所谓的“忙等待”现象，这会耗费CPU资源。**因此，在实际使用中，非阻塞模式通常结合select或poll等系统调用，以高效地等待数据而避免忙等待。
         ```shell
         client: connecting to 139.224.234.82
         recv: Resource temporarily unavailable
@@ -50,7 +60,7 @@
         recv: Resource temporarily unavailable
         client: received 'Hello, World!'
         ```
-    2. 阻塞模式的行为：当接收缓冲区为空，recv会阻塞进程，直到数据到达。这会将该进程挂起，使CPU可调度其他任务。此时，OS会将进程置于等待队列中，等待数据到达并解除阻塞。这种方式不会导致忙等待，但会影响响应时间，因为recv调用会一直阻塞直到有数据可读。
+    2. 阻塞模式的行为：当接收缓冲区为空，recv会阻塞进程，直到数据到达。**这会将该进程挂起，使CPU可调度其他任务。**此时，OS会将进程置于等待队列中，等待数据到达并解除阻塞。这种方式不会导致忙等待，但会影响响应时间，因为recv调用会一直阻塞直到有数据可读。
         ```shell
         client: connecting to 139.224.234.82
         client: received 'Hello, World!'
@@ -58,6 +68,29 @@
         client: received 'Hello, World!'
         ```
     3. 适用场景：非阻塞模式适用于需要实时响应的情况，例如实施数据采集或多客户端的服务器。在这种情况下，结合select或poll等多路复用机制，服务器可以高效地管理多个客户端的连接。
+## chap7-2
+1. [How to use epoll? A complete example in C](https://web.archive.org/web/20120504033548/https://banu.com/blog/2/how-to-use-epoll-a-complete-example-in-c/)
+2. epoll结构体中data字段有什么用？
+    ```cpp
+    typedef union epoll_data
+    {
+    void        *ptr;
+    int          fd;
+    __uint32_t   u32;
+    __uint64_t   u64;
+    } epoll_data_t;
+
+    struct epoll_event
+    {
+    __uint32_t   events; /* Epoll events */
+    epoll_data_t data;   /* User data variable */
+    };
+    ```
+    1. data字段是用户自定义数据的存储区域，允许epoll在事件发生时携带一些上下文信息。
+    2. data.ptr可以存储一个指针，常用于指向一个与事件相关的结构体，便于在回调中访问该事件的上下文。
+3. 如果select/poll/epoll监听的socket都是非阻塞的，但是它们在等待事件发生时设置了等待时间，那么此时如果没有事件发生的话，还需要等吗？ 如果等待时间为-1呢？ 
+    1. 对于非阻塞 socket，select、poll、epoll 的意义在于：这些 socket 在调用 I/O 操作（如 accept/read/write）时不会阻塞应用程序。
+    2. 即使 select 等函数在等待事件时设置了超时时间，应用程序仍可以决定超时时间的长短，并且在检测到事件发生后可以快速进行非阻塞 I/O 操作。
 ## chap7-3
 1. select的BUGS(`man select`)
     >Under Linux, select() may **report a socket file descriptor as "ready for reading", while  nevertheless  a subsequent  read  blocks**. This could for example happen when data has arrived but upon examination has wrong checksum and is discarded. There may be other circumstances in which a file descriptor is  **spuriously reported as ready**. Thus it may be safer to use **O_NONBLOCK** on sockets that should not block.
